@@ -61,20 +61,33 @@ function app:init(conf)
 	conf.url = url
 
 	self:bench_init(conf)
-	printf("%d concurrent requests, %d total requests\n", conf.concurrent, conf.requests)
+	printf("%d concurrent requests, %d total requests\n\n", conf.concurrent, conf.requests)
 
-	--
-	-- Create clients.
-	--
-	
 	self.progress_timer = zmq.stopwatch_start()
 	self.timer = zmq.stopwatch_start()
 
-	for i=1,conf.concurrent do
-		self:new_client()
-	end
+	-- create first batch of clients.
+	self.need_clients = conf.concurrent
+	self.batch_size = math.max(conf.concurrent / 100, 1)
+	self:idle()
+end
 
-	printf("\n")
+function app:idle()
+	-- check if we still need to create more clients.
+	local need = self.need_clients
+	if need > 0 then
+		--
+		-- Create a batch of clients.
+		--
+		local conf = self.conf
+		local s = self.stats
+		local create = math.min(self.batch_size, need)
+		for i=1,create do
+			self:new_client()
+		end
+		self.need_clients = need - create
+		assert(s.clients <= conf.concurrent, "Too many clients.")
+	end
 end
 
 function app:print_progress()

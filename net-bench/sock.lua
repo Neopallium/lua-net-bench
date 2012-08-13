@@ -86,7 +86,18 @@ end,
 local sock_mt = {}
 sock_mt.__index = sock_mt
 
+local pool = {}
+
 local function wrap_llnet_sock(fd, family, stype)
+	local idx = #pool
+	if idx > 0 then
+		local self = pool[idx]
+		pool[idx] = nil
+		self.fd = fd
+		self.family = family
+		self.stype = stype
+		return self
+	end
 	return setmetatable({
 		fd = fd,
 		family = family,
@@ -151,6 +162,7 @@ function sock_mt:close()
 	local fd = self.fd
 	if not fd then return true end
 	self.fd = nil
+	pool[#pool + 1] = self
 	return fd:close()
 end
 

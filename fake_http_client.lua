@@ -54,8 +54,13 @@ __index = function(tab, resp)
 		resp_parsed.keep_alive = http_parser:should_keep_alive()
 		rawset(tab, resp, resp_parsed)
 	end
-	-- need to re-create parser.
-	http_parser = create_parser()
+	-- need to reset parser
+	if http_parser.reset then
+		http_parser:reset()
+	else
+		-- no reset.  Must create a new parser.
+		http_parser = create_parser()
+	end
 	return resp_parsed
 end
 })

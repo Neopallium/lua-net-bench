@@ -29,12 +29,16 @@ function meths:init(conf)
 	-- place-holder
 end
 
+function meths:idle()
+	-- place-holder
+end
+
 function meths:finish()
 	-- place-holder
 end
 
 function meths:stop()
-	self.poll:stop()
+	self.is_running = false
 end
 
 function meths:start(arg)
@@ -46,9 +50,15 @@ function meths:start(arg)
 	-- initialize application using command line options.
 	self:init(conf)
 	-- start event loop
-	self.poll:start()
+	local poll = self.poll
+	self.is_running = true
+	while self.is_running do
+		poll:step(200)
+		self:idle()
+	end
 	-- run any cleanup code.
 	self:finished()
+	poll:close()
 end
 
 return app
