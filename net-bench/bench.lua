@@ -1,5 +1,4 @@
 
-local app = require"net-bench.app"
 local epoller = require"net-bench.epoller"
 
 local sock = require"net-bench.sock"
@@ -8,28 +7,14 @@ local sock_flags = sock.NONBLOCK + sock.CLOEXEC
 
 local llnet = require"llnet"
 
-local stdout = io.stdout
-function printf(fmt, ...)
-	return stdout:write(fmt:format(...))
-end
+local bench_meths = {}
 
--- zmq used for stopwatch timer.
-local zmq = require"zmq"
-
-function app:pre_init()
-	local opts = self:get_options()
-	opts:opt_bool('keep_alive', 'k', false)
-	opts:opt_integer('threads', 't', 0)
-	opts:opt_string('family', 'f', 'inet')
-	opts:required_integer('concurrent', 'c')
-	opts:required_integer('requests', 'n')
-	opts:required_positional('url')
-
-	return self:bench_pre_init()
-end
-
-function app:init(conf)
+function bench_meths:start(app, conf)
 	assert(conf.concurrent <= conf.requests, "insane arguments")
+
+	self.app = app
+	self.conf = conf
+	self.poll = app:get_poll()
 
 	local stats = {
 		started = 0,
@@ -44,14 +29,6 @@ function app:init(conf)
 	self.stats = stats
 
 	--
-	-- Progress printer
-	--
-	self.progress_units = 10
-	self.checkpoint = math.floor(conf.requests / self.progress_units)
-	self.percent = 0
-	self.last_done = 0
-
-	--
 	-- Parse URL
 	--
 	local uri = require"handler.uri"
@@ -60,11 +37,8 @@ function app:init(conf)
 	conf.host = url.host
 	conf.url = url
 
-	self:bench_init(conf)
-	printf("%d concurrent requests, %d total requests\n\n", conf.concurrent, conf.requests)
-
-	self.progress_timer = zmq.stopwatch_start()
-	self.timer = zmq.stopwatch_start()
+	-- initialize benchmark.
+	self:init(conf)
 
 	-- create first batch of clients.
 	self.need_clients = conf.concurrent
@@ -72,45 +46,24 @@ function app:init(conf)
 	self:idle()
 end
 
-function app:idle()
+function bench_meths:idle()
 	-- check if we still need to create more clients.
-	local need = self.need_clients
-	if need > 0 then
-		--
-		-- Create a batch of clients.
-		--
-		local conf = self.conf
-		local s = self.stats
-		local create = math.min(self.batch_size, need)
-		for i=1,create do
-			self:new_client()
-		end
-		self.need_clients = need - create
-		assert(s.clients <= conf.concurrent, "Too many clients.")
-	end
-end
-
-function app:print_progress()
+	if self.need_clients <= 0 then return end
+	--
+	-- Create a batch of clients.
+	--
+	local conf = self.conf
 	local s = self.stats
-	local elapsed = self.progress_timer:stop()
-	if elapsed == 0 then elapsed = 1 end
-
-	local reqs = s.done - self.last_done
-	local throughput = reqs / (elapsed / 1000000)
-	self.last_done = s.done
-
-	self.percent = self.percent + self.progress_units
-	printf([[
-progress: %3i%% done, %7i requests, %5i open conns, %i.%03i%03i sec, %5i req/s
-]], self.percent, s.done, s.clients,
-	(elapsed / 1000000), (elapsed / 1000) % 1000, (elapsed % 1000), throughput)
-	-- start another progress_timer
-	if self.percent < 100 then
-		self.progress_timer = zmq.stopwatch_start()
+	local need = self.need_clients
+	local create = math.min(self.batch_size, need)
+	for i=1,create do
+		self:new_client()
 	end
+	self.need_clients = need - create
+	assert(s.clients <= conf.concurrent, "Too many clients.")
 end
 
-function app:request_finished(sock, succeeded, need_close)
+function bench_meths:request_finished(sock, succeeded, need_close)
 	local s = self.stats
 	local conf = self.conf
 	if succeeded then
@@ -120,8 +73,8 @@ function app:request_finished(sock, succeeded, need_close)
 	end
 	-- the request is finished.
 	s.done = s.done + 1
-	if (s.done % self.checkpoint) == 0 then
-		self:print_progress()
+	if (s.done % conf.checkpoint) == 0 then
+		self.app:print_progress()
 	end
 	-- check if we should close the connection.
 	if need_close or not conf.keep_alive then
@@ -131,27 +84,7 @@ function app:request_finished(sock, succeeded, need_close)
 	return true
 end
 
-function app:finished()
-	local conf = self.conf
-	local s = self.stats
-	local elapsed = self.timer:stop()
-	if elapsed == 0 then elapsed = 1 end
-
-	local throughput = s.done / (elapsed / 1000000)
-
-	printf([[
-
-finished in %i sec, %i millisec and %i microsec, %i req/s
-requests: %i total, %i started, %i done, %i succeeded, %i failed, %i errored, %i parsed
-connections: %i total, %i concurrent
-]],
-	(elapsed / 1000000), (elapsed / 1000) % 1000, (elapsed % 1000), throughput,
-	conf.requests, s.started, s.done, s.succeeded, s.failed, s.errored, s.parsed,
-	s.connections, conf.concurrent
-	)
-end
-
-function app:close_client(sock, err)
+function bench_meths:close_client(sock, err)
 	local s = self.stats
 	local conf = self.conf
 	-- check for error
@@ -175,7 +108,7 @@ function app:close_client(sock, err)
 	assert(s.clients >= 0, "Can't close more clients then we create.")
 	if s.done == conf.requests then
 		-- we should be finished.
-		self:stop()
+		self.app:stop()
 		return
 	end
 	-- check if we need to spawn a new client.
@@ -187,7 +120,7 @@ function app:close_client(sock, err)
 	end
 end
 
-function app:next_request(sock)
+function bench_meths:next_request(sock)
 	local s = self.stats
 	local conf = self.conf
 	if s.started >= conf.requests then
@@ -226,7 +159,7 @@ local function release_buffer(buf)
 end
 
 local function parse_response_cb(sock)
-	local self = sock.app
+	local self = sock.bench
 	local len, err
 	local off = 0
 	local buf = sock.buf
@@ -265,18 +198,18 @@ local function parse_response_cb(sock)
 end
 
 local function connected_cb(sock)
-	local self = sock.app
+	local self = sock.bench
 	sock.on_io_event = parse_response_cb
-	app.poll:mod(sock, epoller.EPOLLIN)
+	self.poll:mod(sock, epoller.EPOLLIN)
 	-- send first request
 	return self:next_request(sock)
 end
 
-function app:new_client()
+function bench_meths:new_client()
 	local s = self.stats
 	local conf = self.conf
 	local sock = assert(new_sock(conf.family, 'stream', 0, sock_flags))
-	sock.app = self
+	sock.bench = self
 	s.connections = s.connections + 1
 	s.clients = s.clients + 1
 	local stat, err = sock:connect(conf.host, conf.port)
@@ -297,21 +230,13 @@ function app:new_client()
 	end
 end
 
-function app:bench_pre_init()
-	-- place-holder
-end
-
-function app:bench_init(conf)
-	-- place-holder
-end
-
 local request = "PING"
-function app:send_request(sock)
+function bench_meths:send_request(sock)
 	-- place-holder
 	return sock:send(request)
 end
 
-function app:parse_response(sock, buf)
+function bench_meths:parse_response(sock, buf)
 	-- place-holder
 	if #buf < #request then return false, "EAGAIN" end
 	local s = self.stats
@@ -319,4 +244,15 @@ function app:parse_response(sock, buf)
 	return (buf:tostring() == request)
 end
 
-return app
+
+-- Create new type of benchmark.
+return function(bench_type)
+	-- dup methods table
+	local meths = {}
+	local mt = { __index = meths }
+	for k,v in pairs(bench_meths) do
+		meths[k] = v
+	end
+	return meths, mt
+end
+

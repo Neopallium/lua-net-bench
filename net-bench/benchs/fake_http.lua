@@ -1,12 +1,10 @@
 
-local bench = require"net-bench.client_bench"
+local bench = require"net-bench.bench"
 
-function bench:bench_pre_init()
-	-- place-holder
-end
+local meths, mt = bench("fake_http")
 
 local REQUEST
-function bench:bench_init(conf)
+function meths:init(conf)
 	--
 	-- Pre-make HTTP request.
 	--
@@ -21,7 +19,7 @@ function bench:bench_init(conf)
 	  "Connection: keep-alive\r\n\r\n"
 end
 
-function bench:send_request(sock)
+function meths:send_request(sock)
 	return sock:send(REQUEST)
 end
 
@@ -65,8 +63,9 @@ __index = function(tab, resp)
 end
 })
 
-function bench:parse_response(sock, buf)
+function meths:parse_response(sock, buf)
 	local s = self.stats
+	-- parse new response.
 	local data = buf:tostring()
 	-- check resp.
 	local resp = parsed_resps[data]
@@ -91,4 +90,6 @@ function bench:parse_response(sock, buf)
 	return succeeded, err, need_close
 end
 
-bench:start(arg)
+return function()
+	return setmetatable({}, mt)
+end
