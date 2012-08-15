@@ -1,3 +1,4 @@
+.*_history.txt
 .*.swp
 *.so
 *.ffi.lua

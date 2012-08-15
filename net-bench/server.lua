@@ -18,13 +18,17 @@ function server_meth:new_acceptor(host, port, family, listen)
 	local acceptor = new_sock(family or 'inet', 'stream')
 	acceptor:setblocking(false)
 	assert(acceptor:setopt('socket', 'reuseaddr', 1))
-	assert(acceptor:bind(host, port))
+	local stat, err = acceptor:bind(host, port)
+	if err == 'EADDRINUSE' then
+		return false
+	end
 	assert(acceptor:listen(listen or 30000))
 	-- register callback for read events.
 	acceptor.server = self
 	acceptor.on_io_event = server_accept
 	self.poll:add(acceptor, epoller.EPOLLIN)
 	self[#self + 1] = acceptor
+	return true
 end
 
 function server_meth:close()
