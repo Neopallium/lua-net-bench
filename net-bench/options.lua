@@ -21,6 +21,13 @@ function options_meth:required(name, short_name, cb)
 	required[#required + 1] = name
 end
 
+function options_meth:required_string(name, short_name)
+	return self:required(name, short_name, function(conf, arg_idx, arg)
+		conf[name] = arg[arg_idx + 1]
+		return 2
+	end)
+end
+
 function options_meth:required_integer(name, short_name)
 	return self:required(name, short_name, function(conf, arg_idx, arg)
 		conf[name] = tonumber(arg[arg_idx + 1])
