@@ -42,7 +42,7 @@ function bench_meths:start(app, conf)
 
 	-- create first batch of clients.
 	self.need_clients = conf.concurrent
-	self.batch_size = math.max(conf.concurrent / 100, 1)
+	self.batch_size = math.max(conf.concurrent / 10, 1)
 	self:idle()
 end
 
