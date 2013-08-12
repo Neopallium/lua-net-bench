@@ -95,10 +95,12 @@ function bench_meths:close_client(sock, err)
 				s.started = s.started - 1
 				self:new_client()
 			else
-				print("error after request sent:", err, sock.fd)
+				self.app:stop()
+				error("error after request sent: " .. err)
 			end
 		elseif err ~= 'CLOSED' then
-			print("error sending request:", err, sock.fd)
+			self.app:stop()
+			error("error sending request: " .. err)
 		end
 	end
 	-- clean-up client socket.
